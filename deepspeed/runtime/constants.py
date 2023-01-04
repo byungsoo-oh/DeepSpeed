@@ -108,23 +108,6 @@ SPARSE_GRADIENTS = "sparse_gradients"
 SPARSE_GRADIENTS_DEFAULT = False
 
 #########################################
-# BFLOAT16 support
-#########################################
-# BFLOAT16 feature. By default, this feature is not enabled.
-# Users can configure in ds_config.json as below example:
-BFLOAT16_FORMAT = '''
-BFLOAT16 parameters should be of the format:
-"bf16": {
-  "enabled": true
-}
-'''
-BFLOAT16 = "bf16"
-BFLOAT16_OLD = "bfloat16"  # keeping for backwards compatibility
-
-BFLOAT16_ENABLED = "enabled"
-BFLOAT16_ENABLED_DEFAULT = False
-
-#########################################
 # FP16 support
 #########################################
 # FP16 feature. By default, this feature is not enabled.
@@ -133,7 +116,6 @@ FP16_FORMAT = '''
 FP16 parameters should be of the format:
 "fp16": {
   "enabled": true,
-  "auto_cast": false,
   "loss_scale": 0,
   "initial_scale_power": 32,
   "loss_scale_window": 1000,
@@ -150,9 +132,6 @@ FP16_ENABLED_DEFAULT = False
 FP16_LOSS_SCALE = "loss_scale"
 FP16_LOSS_SCALE_DEFAULT = 0
 
-FP16_AUTO_CAST = "auto_cast"
-FP16_AUTO_CAST_DEFAULT = False
-
 # FP16 initial dynamic scale loss power
 FP16_INITIAL_SCALE_POWER = "initial_scale_power"
 FP16_INITIAL_SCALE_POWER_DEFAULT = 32
@@ -168,10 +147,6 @@ FP16_HYSTERESIS_DEFAULT = 2
 # FP16 min loss scale
 FP16_MIN_LOSS_SCALE = "min_loss_scale"
 FP16_MIN_LOSS_SCALE_DEFAULT = 1
-
-# FP16 master and grads
-FP16_MASTER_WEIGHTS_AND_GRADS = "fp16_master_weights_and_grads"
-FP16_MASTER_WEIGHTS_AND_GRADS_DEFAULT = False
 
 #########################################
 # Apex AMP support
@@ -204,17 +179,16 @@ GRADIENT_CLIPPING = 'gradient_clipping'
 GRADIENT_CLIPPING_DEFAULT = 0.
 
 #########################################
-# Communication data type
+# FP32 AllReduce
 #########################################
-# Supported types: ['none', 'fp16', 'fp32']
-# By default, this feature is not enabled ('none' value)
+# FP32 All reduce. By default, this feature is not enabled.
 # Users can configure in ds_config.json as below example:
-COMMUNICATION_DATA_TYPE_FORMAT = '''
-Communication data type should be set as:
-"communication_data_type": "fp32"
+FP32_ALLREDUCE_FORMAT = '''
+FP32 Allreduce should be enabled as:
+"fp32_allreduce": true
 '''
-COMMUNICATION_DATA_TYPE = "communication_data_type"
-COMMUNICATION_DATA_TYPE_DEFAULT = None
+FP32_ALLREDUCE = "fp32_allreduce"
+FP32_ALLREDUCE_DEFAULT = False
 
 #########################################
 # Scale/predivide gradients before allreduce
@@ -287,46 +261,31 @@ MEMORY_BREAKDOWN = 'memory_breakdown'
 MEMORY_BREAKDOWN_DEFAULT = False
 
 #########################################
-# Eigenvalue
+# Tensorboard
 #########################################
-# Eigenvalue computation. By default, this feature is not enabled.
+# Tensorboard. By default, this feature is not enabled.
 # Users can configure in ds_config.json as below example:
-EIGENVALUE_FORMAT = '''
+TENSORBOARD_FORMAT = '''
 Tensorboard can be specified as:
-"eigenvalue": {
+"tensorboard": {
   "enabled": true,
-  "verbose": true,
-  "max_iter": 100,
-  "tol": 1e-2,
-  "stability": 1e-6
+  "output_path": "/home/myname/foo",
+  "job_name": "model_lr2e-5_epoch3_seed2_seq64"
 }
 '''
-EIGENVALUE = "eigenvalue"
+TENSORBOARD = "tensorboard"
 
 # Tensorboard enable signal
-EIGENVALUE_ENABLED = "enabled"
-EIGENVALUE_ENABLED_DEFAULT = False
+TENSORBOARD_ENABLED = "enabled"
+TENSORBOARD_ENABLED_DEFAULT = False
 
-EIGENVALUE_VERBOSE = "verbose"
-EIGENVALUE_VERBOSE_DEFAULT = False
+# Tensorboard output path
+TENSORBOARD_OUTPUT_PATH = "output_path"
+TENSORBOARD_OUTPUT_PATH_DEFAULT = ""
 
-EIGENVALUE_MAX_ITER = "max_iter"
-EIGENVALUE_MAX_ITER_DEFAULT = 100
-
-EIGENVALUE_TOL = "tol"
-EIGENVALUE_TOL_DEFAULT = 1e-2
-
-EIGENVALUE_STABILITY = "stability"
-EIGENVALUE_STABILITY_DEFAULT = 1e-6
-
-EIGENVALUE_GAS_BOUNDARY_RESOLUTION = "gas_boundary_resolution"
-EIGENVALUE_GAS_BOUNDARY_RESOLUTION_DEFAULT = 1
-
-EIGENVALUE_LAYER_NAME = "layer_name"
-EIGENVALUE_LAYER_NAME_DEFAULT = "bert.encoder.layer"
-
-EIGENVALUE_LAYER_NUM = "layer_num"
-EIGENVALUE_LAYER_NUM_DEFAULT = 0
+# Tensorboard job name
+TENSORBOARD_JOB_NAME = "job_name"
+TENSORBOARD_JOB_NAME_DEFAULT = "DeepSpeedJobName"
 
 #########################################
 # Progressive Layer Drop (PLD)
@@ -356,14 +315,7 @@ class ValidationMode:
 #########################################
 # Checkpoint config params
 #########################################
-# "checkpoint": {
-#   tag_validation=["Ignore"|"Warn"|"Fail"]
-#   load_universal=false
-#   use_node_local_storage=false
-#   parallel_write: {
-#     pipeline_stage: [True|False]
-#   }
-# }
+# "checkpoint": {tag_validation=["Ignore"|"Warn"|"Fail"]}
 CHECKPOINT = "checkpoint"
 CHECKPOINT_TAG_VALIDATION = "tag_validation"
 CHECKPOINT_TAG_VALIDATION_DEFAULT = ValidationMode.WARN
@@ -372,48 +324,3 @@ CHECKPOINT_TAG_VALIDATION_MODES = [
     ValidationMode.IGNORE,
     ValidationMode.FAIL
 ]
-
-LOAD_UNIVERSAL_CHECKPOINT = "load_universal"
-LOAD_UNIVERSAL_CHECKPOINT_DEFAULT = False
-
-USE_NODE_LOCAL_STORAGE_CHECKPOINT = "use_node_local_storage"
-USE_NODE_LOCAL_STORAGE_CHECKPOINT_DEFAULT = False
-
-CHECKPOINT_PARALLEL_WRITE = "parallel_write"
-CHECKPOINT_PARALLEL_WRITE_PIPELINE_STAGE = "pipeline_stage"
-CHECKPOINT_PARALLEL_WRITE_PIPELINE_STAGE_DEFAULT = False
-
-#########################################
-# Data types config params
-#########################################
-# "data_types": {
-#   grad_accum_dtype=["bf16"|"fp16"|"fp32"]
-#   }
-# }
-
-DATA_TYPES = "data_types"
-GRAD_ACCUM_DTYPE = "grad_accum_dtype"
-GRAD_ACCUM_DTYPE_DEFAULT = None
-
-#########################################
-# Drop the last incomplete Batch
-# #########################################
-# dataloader_drop_last. By default, this feature is not enabled.
-# Users can configure in ds_config.json as below example:
-DATALOADER_DROP_LAST_FORMAT = '''
-The last incomplete batch can be dropped by setting:
-"dataloader_drop_last": True
-'''
-DATALOADER_DROP_LAST = "dataloader_drop_last"
-DATALOADER_DROP_LAST_DEFAULT = False
-
-#########################################
-# PIPELINE PARALLELISM
-#########################################
-PIPE_REPLICATED = 'ds_pipe_replicated'
-
-#########################################
-# DATA PARALLELISM
-#########################################
-DATA_PARALLEL_GROUP = "data_parallel_group"
-GLOBAL_RANK = "global_rank"

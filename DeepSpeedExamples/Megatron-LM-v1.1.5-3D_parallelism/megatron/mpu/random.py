@@ -227,7 +227,7 @@ def model_parallel_cuda_manual_seed(seed):
     # Data parallel gets the original sedd.
     data_parallel_seed = seed
 
-    if torch.distributed.get_rank() == 0:
+    if torch.distributed.get_rank() >= 0:
         print('> initializing model parallel cuda seeds on global rank {}, '
               'model parallel rank {}, and data parallel rank {} with '
               'model parallel seed: {} and data parallel seed: {}'.format(

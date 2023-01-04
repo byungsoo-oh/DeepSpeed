@@ -1,31 +1,20 @@
-"""
+'''
 Copyright 2019 The Microsoft DeepSpeed Team
-"""
+'''
 
 import time
 import torch
-from numpy import mean
+import numpy as np
 from deepspeed.utils.logging import log_dist
-from deepspeed import comm as dist
+
+from deepspeed.utils import logger
 
 try:
     import psutil
-
     PSUTILS_INSTALLED = True
 except ImportError:
     PSUTILS_INSTALLED = False
     pass
-
-
-class CudaEventTimer(object):
-    def __init__(self, start_event: torch.cuda.Event, end_event: torch.cuda.Event):
-        self.start_event = start_event
-        self.end_event = end_event
-
-    def get_elapsed_msec(self):
-        torch.cuda.current_stream().wait_event(self.end_event)
-        self.end_event.synchronize()
-        return self.start_event.elapsed_time(self.end_event)
 
 
 class SynchronizedWallClockTimer:
@@ -34,38 +23,32 @@ class SynchronizedWallClockTimer:
         """Timer."""
         def __init__(self, name):
             self.name_ = name
+            self.elapsed_ = 0.0
             self.started_ = False
-            self.event_timers = []
-            self.start_event = None
-            self.elapsed_records = None
+            self.start_time = time.time()
+            self.time_list = []
 
         def start(self):
             """Start the timer."""
-            assert not self.started_, f"{self.name_} timer has already been started"
-            self.start_event = torch.cuda.Event(enable_timing=True)
-            self.start_event.record()
+            assert not self.started_, 'timer has already been started'
+            torch.cuda.synchronize()
+            self.start_time = time.time()
             self.started_ = True
 
-        def stop(self, reset=False, record=False):
+        def stop(self):
             """Stop the timer."""
-            assert self.started_, "timer is not started"
-            end_event = torch.cuda.Event(enable_timing=True)
-            end_event.record()
-            self.event_timers.append(CudaEventTimer(self.start_event, end_event))
-            self.start_event = None
+            assert self.started_, 'timer is not started'
+            torch.cuda.synchronize()
+            this_elapsed = time.time() - self.start_time
+            self.elapsed_ += this_elapsed
             self.started_ = False
-
-        def _get_elapsed_msec(self):
-            self.elapsed_records = [et.get_elapsed_msec() for et in self.event_timers]
-            self.event_timers.clear()
-            return sum(self.elapsed_records)
+            self.time_list.append(this_elapsed)
 
         def reset(self):
             """Reset timer."""
+            self.elapsed_ = 0.0
             self.started_ = False
-            self.start_event = None
-            self.elapsed_records = None
-            self.event_timers.clear()
+            self.time_list = []
 
         def elapsed(self, reset=True):
             """Calculate the elapsed time."""
@@ -74,24 +57,18 @@ class SynchronizedWallClockTimer:
             if self.started_:
                 self.stop()
             # Get the elapsed time.
-            elapsed_ = self._get_elapsed_msec()
+            elapsed_ = self.elapsed_
+            std = np.std((self.time_list))
             # Reset the elapsed time
             if reset:
                 self.reset()
             # If timing was in progress, set it back.
             if started_:
                 self.start()
-            return elapsed_
-
-        def mean(self):
-            self.elapsed(reset=False)
-            return trim_mean(self.elapsed_records, 0.1)
+            return elapsed_, std
 
     def __init__(self):
         self.timers = {}
-
-    def get_timers(self):
-        return self.timers
 
     def __call__(self, name):
         if name not in self.timers:
@@ -113,45 +90,38 @@ class SynchronizedWallClockTimer:
     def log(self, names, normalizer=1.0, reset=True, memory_breakdown=False, ranks=None):
         """Log a group of timers."""
         assert normalizer > 0.0
-        string = f"rank={dist.get_rank()} time (ms)"
+        string = f'rank={torch.distributed.get_rank()} time (ms)'
         for name in names:
             if name in self.timers:
-                elapsed_time = (self.timers[name].elapsed(reset=reset) / normalizer)
-                string += " | {}: {:.2f}".format(name, elapsed_time)
-
+                elapsed_time, elapsed_std = self.timers[name].elapsed(
+                    reset=reset) 
+                elapsed_std *= 1000.0
+                elapsed_time *= 1000.0
+                elapsed_time /= normalizer
+                string += ' | {}: {:.2f} ({:2f})'.format(name, elapsed_time,  elapsed_std)
         log_dist(string, ranks=ranks or [0])
 
-    def get_mean(self, names, normalizer=1.0, reset=True):
-        """Get the mean of a group of timers."""
-        assert normalizer > 0.0
-        means = {}
-        for name in names:
-            if name in self.timers:
-                elapsed_time = (self.timers[name].mean() * 1000.0 / normalizer)
-                means[name] = elapsed_time
-        return means
 
-
-class ThroughputTimer:
-    def __init__(
-        self,
-        batch_size,
-        start_step=2,
-        steps_per_output=50,
-        monitor_memory=False,
-        logging_fn=None,
-    ):
-        from deepspeed.utils import logger
+class ThroughputTimer():
+    def __init__(self,
+                 batch_size,
+                 num_workers,
+                 start_step=2,
+                 steps_per_output=50,
+                 monitor_memory=False,
+                 logging_fn=None):
         self.start_time = 0
         self.end_time = 0
         self.started = False
-        self.batch_size = 1 if batch_size is None else batch_size
+        self.batch_size = batch_size
+        if batch_size is None:
+            self.batch_size = 1
+        self.num_workers = num_workers
         self.start_step = start_step
         self.epoch_count = 0
-        self.micro_step_count = 0
-        self.global_step_count = 0
+        self.local_step_count = 0
+        self.total_step_count = 0
         self.total_elapsed_time = 0
-        self.step_elapsed_time = 0
         self.steps_per_output = steps_per_output
         self.monitor_memory = monitor_memory
         self.logging = logging_fn
@@ -164,7 +134,7 @@ class ThroughputTimer:
 
     def update_epoch_count(self):
         self.epoch_count += 1
-        self.micro_step_count = 0
+        self.local_step_count = 0
 
     def _init_timer(self):
         self.initialized = True
@@ -172,78 +142,41 @@ class ThroughputTimer:
     def start(self):
         self._init_timer()
         self.started = True
-        if self.global_step_count >= self.start_step:
+        if self.total_step_count >= self.start_step:
             torch.cuda.synchronize()
             self.start_time = time.time()
 
-    def stop(self, global_step=False, report_speed=True):
+    def stop(self, report_speed=True):
         if not self.started:
             return
         self.started = False
-        self.micro_step_count += 1
-        if global_step:
-            self.global_step_count += 1
-
-        if self.start_time > 0:
+        self.total_step_count += 1
+        self.local_step_count += 1
+        if self.total_step_count > self.start_step:
             torch.cuda.synchronize()
             self.end_time = time.time()
             duration = self.end_time - self.start_time
             self.total_elapsed_time += duration
-            self.step_elapsed_time += duration
-
-            if global_step:
-                if report_speed and self.global_step_count % self.steps_per_output == 0:
-                    self.logging(
-                        "epoch={}/micro_step={}/global_step={}, RunningAvgSamplesPerSec={}, CurrSamplesPerSec={}, "
-                        "MemAllocated={}GB, MaxMemAllocated={}GB".format(
-                            self.epoch_count,
-                            self.micro_step_count,
-                            self.global_step_count,
-                            self.avg_samples_per_sec(),
-                            self.batch_size / self.step_elapsed_time,
-                            round(torch.cuda.memory_allocated() / 1024**3,
-                                  2),
-                            round(torch.cuda.max_memory_allocated() / 1024**3,
-                                  2),
-                        ))
-                    if self.monitor_memory:
-                        virt_mem = psutil.virtual_memory()
-                        swap = psutil.swap_memory()
-                        self.logging(
-                            "epoch={}/micro_step={}/global_step={}, vm %: {}, swap %: {}"
-                            .format(
-                                self.epoch_count,
-                                self.micro_step_count,
-                                self.global_step_count,
-                                virt_mem.percent,
-                                swap.percent,
-                            ))
-                self.step_elapsed_time = 0
+            if self.local_step_count % self.steps_per_output == 0:
+                if report_speed:
+                    self.logging("{}/{}, SamplesPerSec={}".format(
+                        self.epoch_count,
+                        self.local_step_count,
+                        self.avg_samples_per_sec()))
+                if self.monitor_memory:
+                    virt_mem = psutil.virtual_memory()
+                    swap = psutil.swap_memory()
+                    self.logging("{}/{}, vm percent: {}, swap percent: {}".format(
+                        self.epoch_count,
+                        self.local_step_count,
+                        virt_mem.percent,
+                        swap.percent))
 
     def avg_samples_per_sec(self):
-        if self.global_step_count > 0:
-            total_step_offset = self.global_step_count - self.start_step
+        if self.total_step_count > 0:
+            samples_per_step = self.batch_size * self.num_workers
+            total_step_offset = self.total_step_count - self.start_step
             avg_time_per_step = self.total_elapsed_time / total_step_offset
             # training samples per second
-            return self.batch_size / avg_time_per_step
+            return samples_per_step / avg_time_per_step
         return float("-inf")
-
-
-def trim_mean(data, trim_percent):
-    """Compute the trimmed mean of a list of numbers.
-
-    Args:
-        data (list): List of numbers.
-        trim_percent (float): Percentage of data to trim.
-
-    Returns:
-        float: Trimmed mean.
-    """
-    assert trim_percent >= 0.0 and trim_percent <= 1.0
-    n = len(data)
-    # Account for edge case of empty list
-    if len(data) == 0:
-        return 0
-    data.sort()
-    k = int(round(n * (trim_percent)))
-    return mean(data[k:n - k])

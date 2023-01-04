@@ -38,6 +38,7 @@ def model_provider():
 
     print_rank_0('building GPT2 model ...')
     if args.pipe_parallel_size == 0:
+        assert False
         model = GPT2Model(num_tokentypes=0, parallel_output=True)
     else:
         model = GPT2ModelPipe(num_tokentypes=0, parallel_output=True, topology=mpu.get_topology())
@@ -50,6 +51,7 @@ def model_provider():
 
 def get_batch(data_iterator):
     """Generate a batch"""
+    assert False
     args = get_args()
     tokenizer = get_tokenizer()
 
@@ -147,12 +149,14 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
         seq_length=args.seq_length,
         seed=args.seed,
         skip_warmup=(not args.mmap_warmup))
+    #train_ds = FakeGPT2Dataset()
+    #valid_ds = test_ds = None
     print_rank_0("> finished creating GPT2 datasets ...")
 
     return train_ds, valid_ds, test_ds
 
 
 if __name__ == "__main__":
-
+    assert not torch.distributed.is_initialized()
     pretrain(train_valid_test_datasets_provider, model_provider, forward_step,
              args_defaults={'tokenizer_type': 'GPT2BPETokenizer'})

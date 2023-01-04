@@ -1,5 +1,6 @@
+import time
 import torch
-import deepspeed.comm as dist
+import torch.distributed as dist
 import numpy as np
 import argparse
 import deepspeed
@@ -24,7 +25,7 @@ backend = NcclBackend()
 local_rank = args.local_rank
 
 
-# A simulated compression function using deepspeed.comm
+# A simulated compression function using torch.distributed
 def torch_sim(a):
     a_sign = a.sign().add_(1).bool().float().add_(-0.5).mul_(2.0)
     scale = a.norm() / np.sqrt(a.numel())
@@ -42,7 +43,7 @@ def torch_sim(a):
     rank = dist.get_rank()
     server_error = a_list[rank] - server_scale[rank] * a_sign_list[rank]
     torch.cuda.synchronize()
-    dist.barrier()
+    torch.distributed.barrier()
     return a_server_compressed, worker_error, server_error
 
 

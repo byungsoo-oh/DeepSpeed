@@ -3,7 +3,8 @@ Copyright 2020 The Microsoft DeepSpeed Team
 '''
 
 import torch
-from deepspeed import comm as dist
+import torch.distributed as dist
+import time
 import cupy
 import numpy as np
 
@@ -11,20 +12,11 @@ from deepspeed.runtime.compression.cupy import CupyBackend
 
 
 class NcclBackend(object):
-    def __init__(self, mpu=None):
-        if mpu is None:
-            self.world_group = dist.new_group(ranks=range(dist.get_world_size()))
-        else:
-            self.mpu = mpu
-            self.world_group = self.mpu.get_data_parallel_group()
+    def __init__(self):
+        self.world_group = dist.new_group(ranks=range(dist.get_world_size()))
         self.rank = dist.get_rank(group=self.world_group)
         self.size = dist.get_world_size(group=self.world_group)
         self.compression_backend = CupyBackend()
-        self.bool_not_supported = False
-        TORCH_MAJOR = int(torch.__version__.split('.')[0])
-        TORCH_MINOR = int(torch.__version__.split('.')[1])
-        if TORCH_MAJOR >= 1 and TORCH_MINOR >= 10:
-            self.bool_not_supported = True
 
     def my_igather(self, rank, size, group, sendbuf, recvbuf, root):
         req = []
@@ -68,19 +60,13 @@ class NcclBackend(object):
             buffer_m = torch.cat([buffer_m, empty_tensor])
 
         buffer_m.add_(worker_error)
-        worker_scale = torch.norm(buffer_m) / np.sqrt(buffer_m.numel())
+        worker_scale = torch.norm(buffer_m) / np.sqrt(torch.numel(buffer_m))
         worker_error.set_(buffer_m - worker_scale *
                           buffer_m.sign().add_(1).bool().float().add_(-0.5).mul_(2.0))
 
-        if self.bool_not_supported:
-            cupy_sign_list_packed = self.compression_backend.compress_by_chunk(
-                self.compression_backend.torch2cupy(
-                    buffer_m.sign_().add_(1).bool().to(dtype=torch.uint8)),
-                self.size)
-        else:
-            cupy_sign_list_packed = self.compression_backend.compress_by_chunk(
-                self.compression_backend.torch2cupy(buffer_m.sign_().add_(1).bool()),
-                self.size)
+        cupy_sign_list_packed = self.compression_backend.compress_by_chunk(
+            self.compression_backend.torch2cupy(buffer_m.sign_().add_(1).bool()),
+            self.size)
         cupy_worker_scale = self.compression_backend.torch2cupy(worker_scale)
 
         cupy_recvbuf_sign = cupy.zeros(
@@ -106,11 +92,9 @@ class NcclBackend(object):
         # communication phase 1
         # gather_start = time.time()
         # Alltoall for sign
-        dist.all_to_all_single(recvbuf_sign,
-                               torch.stack(sign_list_packed),
-                               group=self.world_group)
+        dist.all_to_all_single(recvbuf_sign, torch.stack(sign_list_packed))
         # Allgather for scale
-        dist.all_gather(recvbuf_scale, worker_scale, group=self.world_group)
+        dist.all_gather(recvbuf_scale, worker_scale)
 
         # gather_end = time.time()
 
@@ -134,16 +118,10 @@ class NcclBackend(object):
 
         # cupy_server_scale = self.compression_backend.torch2cupy(server_scale)
 
-        if self.bool_not_supported:
-            cupy_server_sign_packed = self.compression_backend.compress_by_chunk(
-                self.compression_backend.torch2cupy(
-                    compensated_server_m.sign_().add_(1).bool().to(dtype=torch.uint8)),
-                1)
-        else:
-            cupy_server_sign_packed = self.compression_backend.compress_by_chunk(
-                self.compression_backend.torch2cupy(
-                    compensated_server_m.sign_().add_(1).bool()),
-                1)
+        cupy_server_sign_packed = self.compression_backend.compress_by_chunk(
+            self.compression_backend.torch2cupy(
+                compensated_server_m.sign_().add_(1).bool()),
+            1)
         compensated_server_m = None
 
         cupy_recvbuf_sign_server = cupy.zeros(
@@ -173,10 +151,8 @@ class NcclBackend(object):
         ]
 
         # Communication Phase 2
-        dist.all_gather(recvbuf_sign_server,
-                        server_sign_packed[0],
-                        group=self.world_group)
-        dist.all_gather(recvbuf_scale_server, server_scale, group=self.world_group)
+        dist.all_gather(recvbuf_sign_server, server_sign_packed[0])
+        dist.all_gather(recvbuf_scale_server, server_scale)
 
         cupy_server_sign_packed = None
 

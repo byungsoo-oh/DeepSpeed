@@ -47,6 +47,10 @@ def CrossEntropy(output, labels):
     """ From pretrain_gpt2:forward_step() """
     labels, loss_mask = labels[0], labels[1]
 
+    if isinstance(output, tuple):
+        assert len(output) == 1, "Master, the pipeline has some bug."
+        output = output[0]
+    
     losses = mpu.vocab_parallel_cross_entropy(output.contiguous().float(), labels)
     loss_mask = loss_mask.view(-1)
     loss = torch.sum(losses.view(-1) * loss_mask) / loss_mask.sum()

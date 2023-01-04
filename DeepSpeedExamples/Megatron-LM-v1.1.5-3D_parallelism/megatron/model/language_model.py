@@ -166,6 +166,7 @@ class Embedding(MegatronModule):
         # Embeddings.
         words_embeddings = self.word_embeddings(input_ids)
         position_embeddings = self.position_embeddings(position_ids)
+        #print(f"{position_ids.size()}, {position_embeddings.size()}, {position_ids}")
         embeddings = words_embeddings + position_embeddings
         if tokentype_ids is not None:
             assert self.tokentype_embeddings is not None

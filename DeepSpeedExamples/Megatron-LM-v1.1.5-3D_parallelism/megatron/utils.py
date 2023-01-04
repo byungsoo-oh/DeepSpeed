@@ -114,6 +114,32 @@ def make_data_loader(dataset):
                                        num_workers=num_workers,
                                        pin_memory=True)
 
+def make_data_loader_transgan(dataset):
+    """Buld dataloader given an input dataset."""
+    if dataset is None:
+        return None
+    args = get_args()
+
+    # Data parallel arguments.
+    world_size = mpu.get_data_parallel_world_size()
+    rank = mpu.get_data_parallel_rank()
+    #global_batch_size = args.batch_size * world_size
+    global_batch_size = args.gen_batch_size * world_size #args.batch_size * world_size
+    num_workers = args.num_workers
+
+    # Use a simple sampler with distributed batch sampler.
+    sampler = torch.utils.data.SequentialSampler(dataset)
+    batch_sampler = DistributedBatchSampler(sampler=sampler,
+                                            batch_size=global_batch_size,
+                                            drop_last=True,
+                                            rank=rank,
+                                            world_size=world_size)
+    # Torch dataloader.
+    return torch.utils.data.DataLoader(dataset,
+                                       batch_sampler=batch_sampler,
+                                       num_workers=num_workers,
+                                       pin_memory=True)
+
 
 def get_ltor_masks_and_position_ids(data,
                                     eod_token,

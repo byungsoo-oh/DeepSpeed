@@ -1,6 +1,9 @@
 # Copyright 2019 The Microsoft DeepSpeed Team
 
-from deepspeed import comm as dist
+from deepspeed.utils import logger
+
+import torch.distributed as dist
+import sys
 
 from collections import namedtuple
 from itertools import product as cartesian_product
@@ -55,7 +58,7 @@ class ProcessTopology:
             raise ValueError('get_rank() does not support slices. Use filter_match())')
 
         key = self.ProcessCoord(**coord_kwargs)
-        assert key in self.mapping, f'key {coord_kwargs} invalid'
+        assert key in self.mapping, f'key {kwargs} invalid'
         return self.mapping[key]
 
     def get_axis_names(self):
@@ -188,7 +191,7 @@ class ProcessTopology:
             return True
 
         coords = filter(_filter_helper, self.mapping.keys())
-        return [self.mapping[coord] for coord in coords]
+        return [self.mapping[coo] for coo in coords]
 
     def get_axis_list(self, axis, idx):
         """Returns the list of global ranks whose coordinate in an axis is idx.
@@ -213,7 +216,6 @@ class ProcessTopology:
     def __str__(self):
         return str(self.mapping)
 
-
 def _prime_factors(N):
     """ Returns the prime factorization of positive integer N. """
     if N <= 0:
@@ -228,9 +230,12 @@ def _prime_factors(N):
                 break
     return primes
 
+class AmpTopology(ProcessTopology):
+    def __init__(dp_group, mp_group, pp_group):
+        pass
 
 class PipeDataParallelTopology(ProcessTopology):
-    """ A topology specialization for hybrid data and pipeline parallelism.
+    """ A topology specialiation for hybrid data and pipeline parallelism.
 
         Uses data parallelism on the last dimension to encourage gradient
         reductions to use high-bandwidth intra-node links and lower-volume
@@ -288,7 +293,6 @@ class PipelineParallelGrid:
         self.data_parallel_size = max(self._topo.get_dim('data'), 1)
         self.pipe_parallel_size = max(self._topo.get_dim('pipe'), 1)
         self.model_parallel_size = max(self._topo.get_dim('model'), 1)
-        self.slice_parallel_size = self.model_parallel_size
         assert self._is_grid_valid(), "Invalid Grid"
 
         self.stage_id = self.get_stage_id()
@@ -447,7 +451,7 @@ class PipelineParallelGrid:
             return 0
 
     def get_slice_parallel_world_size(self):
-        return self.slice_parallel_size
+        self.slice_parallel_size
 
     def get_slice_parallel_group(self):
         return self.slice_proc_group

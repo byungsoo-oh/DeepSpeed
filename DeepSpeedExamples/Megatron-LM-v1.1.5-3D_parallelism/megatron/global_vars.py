@@ -20,6 +20,7 @@ import sys
 import time
 
 import torch
+import numpy as np
 
 from megatron.tokenizer import build_tokenizer
 from .arguments import parse_args
@@ -29,7 +30,7 @@ _GLOBAL_TOKENIZER = None
 _GLOBAL_TENSORBOARD_WRITER = None
 _GLOBAL_ADLR_AUTORESUME = None
 _GLOBAL_TIMERS = None
-
+_GLOBAL_ELAP = None
 
 def get_args():
     """Return arguments."""
@@ -71,7 +72,20 @@ def set_global_variables(extra_args_provider=None, args_defaults={},
     _set_tensorboard_writer(args)
     _set_adlr_autoresume(args)
     _set_timers()
+    _set_elap()
 
+def get_elap():
+    _ensure_var_is_initialized(_GLOBAL_ELAP, 'elap')
+    return _GLOBAL_ELAP
+
+def _set_elap():
+    global _GLOBAL_ELAP
+    _ensure_var_is_not_initialized(_GLOBAL_ELAP, 'elap')
+    _GLOBAL_ELAP = []
+
+def reset_elap():
+    global _GLOBAL_ELAP
+    _GLOBAL_ELAP = []
 
 def _parse_args(extra_args_provider=None, defaults={},
                 ignore_unknown_args=False):
@@ -160,6 +174,7 @@ class _Timer:
         self.elapsed_ = 0.0
         self.started_ = False
         self.start_time = time.time()
+        self.time_list = []
 
     def start(self):
         """Start the timer."""
@@ -172,13 +187,16 @@ class _Timer:
         """Stop the timer."""
         assert self.started_, 'timer is not started'
         torch.cuda.synchronize()
-        self.elapsed_ += (time.time() - self.start_time)
+        this_elapsed = time.time() - self.start_time
+        self.elapsed_ += this_elapsed
         self.started_ = False
+        self.time_list.append(this_elapsed)
 
     def reset(self):
         """Reset timer."""
         self.elapsed_ = 0.0
         self.started_ = False
+        self.time_list = []
 
     def elapsed(self, reset=True):
         """Calculate the elapsed time."""
@@ -188,13 +206,14 @@ class _Timer:
             self.stop()
         # Get the elapsed time.
         elapsed_ = self.elapsed_
+        elapsed_std = np.std(np.asarray(self.time_list))
         # Reset the elapsed time
         if reset:
             self.reset()
         # If timing was in progress, set it back.
         if started_:
             self.start()
-        return elapsed_
+        return elapsed_, elapsed_std
 
 
 class Timers:
@@ -213,6 +232,7 @@ class Timers:
         # currently when using add_scalars,
         # torch.utils.add_scalars makes each timer its own run, which
         # polutes the runs list, so we just add each as a scalar
+        assert False
         assert normalizer > 0.0
         for name in names:
             value = self.timers[name].elapsed(reset=reset) / normalizer
@@ -223,9 +243,12 @@ class Timers:
         assert normalizer > 0.0
         string = 'time (ms)'
         for name in names:
-            elapsed_time = self.timers[name].elapsed(
-                reset=reset) * 1000.0 / normalizer
-            string += ' | {}: {:.2f}'.format(name, elapsed_time)
+            elapsed_time, elapsed_std = self.timers[name].elapsed(
+                reset=reset)
+            elapsed_time *= 1000.0
+            elapsed_time /= normalizer
+            elapsed_std *= 1000.0
+            string += ' | {}: {:.2f} ({:2f})'.format(name, elapsed_time, elapsed_std)
         if torch.distributed.is_initialized():
             if torch.distributed.get_rank() == 0:
                 print(string, flush=True)

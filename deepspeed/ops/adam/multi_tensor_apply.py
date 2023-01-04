@@ -4,6 +4,7 @@ Copyright 2020 The Microsoft DeepSpeed Team
 Copyright NVIDIA/apex
 This file is adapted from NVIDIA/apex, commit a109f85
 '''
+import torch
 
 
 class MultiTensorApply(object):

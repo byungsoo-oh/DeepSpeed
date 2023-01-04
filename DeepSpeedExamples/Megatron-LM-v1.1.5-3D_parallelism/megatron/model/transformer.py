@@ -96,7 +96,8 @@ class ParallelMLP(MegatronModule):
 
     def forward(self, hidden_states):
 
-        # [s, b, 4hp]
+        # [s, b, 4hpf torch.distributed.is_initialized():]
+        #assert hidden_states.shape[1] == 1, "Check batch size!"
         intermediate_parallel, bias_parallel = self.dense_h_to_4h(hidden_states)
 
         if self.bias_gelu_fusion:
@@ -219,6 +220,7 @@ class ParallelSelfAttention(MegatronModule):
         # =====================
 
         # Attention heads [sq, b, h] --> [sq, b, (np * 3 * hn)]
+        print(f"{hidden_states.shape}")
         mixed_x_layer, _ = self.query_key_value(hidden_states)
 
         checkpoint_version = get_checkpoint_version()
@@ -439,6 +441,7 @@ class ParallelTransformerLayer(MegatronModule):
         # Layer norm at the begining of the transformer layer.
         layernorm_output = self.input_layernorm(hidden_states)
         # Self attention.
+        #print(f"gpt: {layernorm_output.shape}")
         attention_output, attention_bias = \
             self.attention(layernorm_output,
                            attention_mask,
@@ -503,6 +506,10 @@ class ParallelTransformerLayerPipe(ParallelTransformerLayer):
     """Extends ParallelTransformerLayer to forward attention_mask through the pipeline. """
     def forward(self, args):
         hidden_states, attention_mask = args[0], args[1]
+        print((super().forward(*args)).shape)
+        print(attention_mask.shape)
+        #print("-----------------")
+        #print(attention_mask)
         return super().forward(*args), attention_mask
 
 class ParallelTransformer(MegatronModule):

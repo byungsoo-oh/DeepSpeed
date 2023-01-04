@@ -26,9 +26,11 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, vocab_parallel_logits, target):
-
+        
+#        print(f"1,{vocab_parallel_logits.size()}")
         # Maximum value along vocab dimension across all GPUs.
         logits_max = torch.max(vocab_parallel_logits, dim=-1)[0]
+#        print(f"2, {logits_max.size()}")
         torch.distributed.all_reduce(logits_max,
                                      op=torch.distributed.ReduceOp.MAX,
                                      group=get_model_parallel_group())
@@ -60,6 +62,7 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
         predicted_logits = predicted_logits_1d.view_as(target)
         predicted_logits[target_mask] = 0.0
         # All reduce is needed to get the chunks from other GPUs.
+#        print(f"3 {predicted_logits.size()}")
         torch.distributed.all_reduce(predicted_logits,
                                      op=torch.distributed.ReduceOp.SUM,
                                      group=get_model_parallel_group())
@@ -68,6 +71,7 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
         exp_logits = vocab_parallel_logits
         torch.exp(vocab_parallel_logits, out=exp_logits)
         sum_exp_logits = exp_logits.sum(dim=-1)
+#        print(f"4 {sum_exp_logits.size()}")
         torch.distributed.all_reduce(sum_exp_logits,
                                      op=torch.distributed.ReduceOp.SUM,
                                      group=get_model_parallel_group())
@@ -78,7 +82,9 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
         # Store softmax, target-mask and masked-target for backward pass.
         exp_logits.div_(sum_exp_logits.unsqueeze(dim=-1))
         ctx.save_for_backward(exp_logits, target_mask, masked_target_1d)
-
+#        import time
+#        time.sleep(10)
+#        assert False
         return loss
 
     @staticmethod

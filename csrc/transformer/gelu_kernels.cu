@@ -35,11 +35,13 @@ the intermediate hyperbolic tangent, since there's no intrinsic
 that computes it directly.
 */
 
-__global__ void gelu_kernel(const float* input, float* vals, int row_stride, int iterations)
+__global__ void gelu_kernel(const float* input, float* vals, int intermediate_size)
 {
     int row = blockIdx.x;
     int id = threadIdx.x;
     int loop_stride = blockDim.x;
+    int iterations = intermediate_size / blockDim.x / 4;
+    int row_stride = intermediate_size / 4;
 
     const float4* input_cast = reinterpret_cast<const float4*>(input);
     float4* vals_cast = reinterpret_cast<float4*>(vals);
@@ -58,12 +60,14 @@ __global__ void gelu_kernel(const float* input, float* vals, int row_stride, int
     }
 }
 
-__global__ void gelu_kernel(const __half* input, __half* vals, int row_stride, int iterations)
+__global__ void gelu_kernel(const __half* input, __half* vals, int intermediate_size)
 {
-#ifdef HALF_PRECISION_AVAILABLE
+#if __CUDA_ARCH__ >= 700
     int row = blockIdx.x;
     int id = threadIdx.x;
     int loop_stride = blockDim.x;
+    int iterations = intermediate_size / blockDim.x / 4;
+    int row_stride = intermediate_size / 4;
 
     const float2* input_cast = reinterpret_cast<const float2*>(input);
     float2* vals_cast = reinterpret_cast<float2*>(vals);
@@ -94,12 +98,13 @@ __global__ void gelu_kernel(const __half* input, __half* vals, int row_stride, i
 __global__ void fused_bias_gelu(const float* input,
                                 const float* bias,
                                 float* vals,
-                                int row_stride,
-                                int iterations)
+                                int intermediate_size)
 {
     int row = blockIdx.x;
     int id = threadIdx.x;
     int loop_stride = blockDim.x;
+    int iterations = intermediate_size / blockDim.x / 4;
+    int row_stride = intermediate_size / 4;
 
     const float4* input_cast = reinterpret_cast<const float4*>(input);
     float4* vals_cast = reinterpret_cast<float4*>(vals);
@@ -128,13 +133,14 @@ __global__ void fused_bias_gelu(const float* input,
 __global__ void fused_bias_gelu(const __half* input,
                                 const __half* bias,
                                 __half* vals,
-                                int row_stride,
-                                int iterations)
+                                int intermediate_size)
 {
-#ifdef HALF_PRECISION_AVAILABLE
+#if __CUDA_ARCH__ >= 700
     int row = blockIdx.x;
     int id = threadIdx.x;
     int loop_stride = blockDim.x;
+    int iterations = intermediate_size / blockDim.x / 4;
+    int row_stride = intermediate_size / 4;
 
     const float2* input_cast = reinterpret_cast<const float2*>(input);
     float2* vals_cast = reinterpret_cast<float2*>(vals);
@@ -176,12 +182,13 @@ __global__ void fused_bias_gelu(const __half* input,
 __global__ void d_gelu_func(float* d_output,
                             const float* gelu_input,
                             const float* bias,
-                            int row_stride,
-                            int iterations)
+                            int intermediate_size)
 {
     int row = blockIdx.x;
     int id = threadIdx.x;
     int loop_stride = blockDim.x;
+    int iterations = intermediate_size / blockDim.x / 4;
+    int row_stride = intermediate_size / 4;
 
     float4* d_output_cast = reinterpret_cast<float4*>(d_output);
     const float4* gelu_input_cast = reinterpret_cast<const float4*>(gelu_input);
@@ -211,13 +218,14 @@ __global__ void d_gelu_func(float* d_output,
 __global__ void d_gelu_func(__half* d_output,
                             const __half* gelu_input,
                             const __half* bias,
-                            int row_stride,
-                            int iterations)
+                            int intermediate_size)
 {
-#ifdef HALF_PRECISION_AVAILABLE
+#if __CUDA_ARCH__ >= 700
     int row = blockIdx.x;
     int id = threadIdx.x;
     int loop_stride = blockDim.x;
+    int iterations = intermediate_size / blockDim.x / 4;
+    int row_stride = intermediate_size / 4;
 
     float2* d_output_cast = reinterpret_cast<float2*>(d_output);
     const float2* gelu_input_cast = reinterpret_cast<const float2*>(gelu_input);
@@ -274,12 +282,11 @@ void launch_bias_gelu(const T* input,
                       cudaStream_t stream)
 {
     int iterations = (intermediate_size + 1023) / 1024;
-    int threads = (intermediate_size - 1) / (iterations * 4) + 1;
+    int threads = intermediate_size / iterations / 4;
     dim3 block_dims(threads);
     dim3 grid_dims(batch_size);
 
-    fused_bias_gelu<<<grid_dims, block_dims, 0, stream>>>(
-        input, bias, output, intermediate_size / 4, iterations);
+    fused_bias_gelu<<<grid_dims, block_dims, 0, stream>>>(input, bias, output, intermediate_size);
 }
 
 template <typename T>
@@ -290,12 +297,11 @@ void launch_gelu(const T* input,
                  cudaStream_t stream)
 {
     int iterations = (intermediate_size + 1023) / 1024;
-    int threads = (intermediate_size - 1) / (iterations * 4) + 1;
+    int threads = intermediate_size / iterations / 4;
     dim3 block_dims(threads);
     dim3 grid_dims(batch_size);
 
-    gelu_kernel<<<grid_dims, block_dims, 0, stream>>>(
-        input, output, intermediate_size / 4, iterations);
+    gelu_kernel<<<grid_dims, block_dims, 0, stream>>>(input, output, intermediate_size);
 }
 
 template void launch_bias_gelu<float>(const float*, const float*, float*, int, int, cudaStream_t);
@@ -318,12 +324,11 @@ void launch_d_gelu(T* d_output,
                    cudaStream_t stream)
 {
     int iterations = (intermediate_size + 1023) / 1024;
-    int threads = (intermediate_size - 1) / (iterations * 4) + 1;
+    int threads = intermediate_size / iterations / 4;
     dim3 block_dims(threads);
     dim3 grid_dims(batch_size);
 
-    d_gelu_func<<<grid_dims, block_dims, 0, stream>>>(
-        d_output, input, bias, intermediate_size / 4, iterations);
+    d_gelu_func<<<grid_dims, block_dims, 0, stream>>>(d_output, input, bias, intermediate_size);
 }
 
 template void launch_d_gelu<float>(float*, const float*, const float*, int, int, cudaStream_t);

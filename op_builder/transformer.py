@@ -1,6 +1,7 @@
 """
 Copyright 2020 The Microsoft DeepSpeed Team
 """
+import torch
 from .builder import CUDAOpBuilder
 
 
@@ -15,12 +16,6 @@ class TransformerBuilder(CUDAOpBuilder):
     def absolute_name(self):
         return f'deepspeed.ops.transformer.{self.NAME}_op'
 
-    def extra_ldflags(self):
-        if not self.is_rocm_pytorch():
-            return ['-lcurand']
-        else:
-            return []
-
     def sources(self):
         return [
             'csrc/transformer/ds_transformer_cuda.cpp',
@@ -34,11 +29,19 @@ class TransformerBuilder(CUDAOpBuilder):
         ]
 
     def include_paths(self):
-        includes = ['csrc/includes']
-        if self.is_rocm_pytorch():
-            from torch.utils.cpp_extension import ROCM_HOME
-            includes += [
-                '{}/hiprand/include'.format(ROCM_HOME),
-                '{}/rocrand/include'.format(ROCM_HOME)
-            ]
-        return includes
+        return ['csrc/includes']
+
+    def nvcc_args(self):
+        args = [
+            '-O3',
+            '--use_fast_math',
+            '-std=c++14',
+            '-U__CUDA_NO_HALF_OPERATORS__',
+            '-U__CUDA_NO_HALF_CONVERSIONS__',
+            '-U__CUDA_NO_HALF2_OPERATORS__'
+        ]
+
+        return args + self.compute_capability_args()
+
+    def cxx_args(self):
+        return ['-O3', '-std=c++14', '-g', '-Wno-reorder']

@@ -13,22 +13,41 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import time
 import torch
+import torch.distributed as dist
 
 from .initialize import get_model_parallel_group, get_model_parallel_world_size, get_model_parallel_rank
 from .utils import split_tensor_along_last_dim
-
+from megatron import get_timers
+import numpy as np
 
 def _reduce(input_):
     """All-reduce the the input tensor across model parallel group."""
-
+    timers = get_timers()
     # Bypass the function if we are using only 1 GPU.
     if get_model_parallel_world_size()==1:
         return input_
 
+    #amp_profile = os.getenv("amp_profile")
+    #if amp_profile == "True" and dist.get_rank() == 0:
+    #    torch.cuda.synchronize()
+    #time_s = time.time()
+    timers('mp allreduce').start()
     # All-reduce.
+    #print(torch.numel(input_))
+    #os.environ["mp_count_param"] = str(int(os.environ["mp_count_param"]) + torch.numel(input_))
+    #print(os.environ["mp_count_param"])
     torch.distributed.all_reduce(input_, group=get_model_parallel_group())
-
+    timers('mp allreduce').stop()
+    #if amp_profile == "True" and dist.get_rank() == 0:
+    #    torch.cuda.synchronize()
+    #time_e = time.time()
+    #time_used = time_e - time_s
+    # holy super dirty hack I am so done, assume one layer only allreduce once
+    #if amp_profile == "True" and dist.get_rank() == 0:
+    #     os.environ["amp_mp_value"] = str(time_used)
     return input_
 
 

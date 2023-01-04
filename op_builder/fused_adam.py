@@ -1,9 +1,8 @@
 """
 Copyright 2020 The Microsoft DeepSpeed Team
 """
+import torch
 from .builder import CUDAOpBuilder
-
-import sys
 
 
 class FusedAdamBuilder(CUDAOpBuilder):
@@ -20,18 +19,13 @@ class FusedAdamBuilder(CUDAOpBuilder):
         return ['csrc/adam/fused_adam_frontend.cpp', 'csrc/adam/multi_tensor_adam.cu']
 
     def include_paths(self):
-        return ['csrc/includes', 'csrc/adam']
+        return ['csrc/includes']
 
     def cxx_args(self):
-        args = super().cxx_args()
-        return args + self.version_dependent_macros()
+        return ['-O3'] + self.version_dependent_macros()
 
     def nvcc_args(self):
-        nvcc_flags = ['-O3'] + self.version_dependent_macros()
-        if not self.is_rocm_pytorch():
-            nvcc_flags.extend([
-                '-allow-unsupported-compiler' if sys.platform == "win32" else '',
-                '-lineinfo',
+        return ['-lineinfo',
+                '-O3',
                 '--use_fast_math'
-            ] + self.compute_capability_args())
-        return nvcc_flags
+                ] + self.version_dependent_macros() + self.compute_capability_args()

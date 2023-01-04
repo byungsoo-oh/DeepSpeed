@@ -1,3 +1,4 @@
+# coding=utf-8
 # Copyright (c) 2019, The Microsoft DeepSpeed Team. All rights reserved.
 #
 # Note: please copy webtext data to "Megatron-LM" folder, before running this script.
@@ -7,6 +8,8 @@ import unittest
 
 sys.path.append('../DeepSpeedExamples/Megatron_GPT2')
 sys.path.append('../DeepSpeedExamples/BingBertSquad')
+
+import os
 
 # Import the test cases here.
 import Megatron_GPT2

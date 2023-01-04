@@ -19,6 +19,7 @@
 
 
 import math
+import time
 
 import torch
 import torch.nn.functional as F
@@ -127,7 +128,9 @@ class VocabParallelEmbedding(torch.nn.Module):
                 self.model_parallel_size)
         self.num_embeddings_per_partition = self.vocab_end_index - \
             self.vocab_start_index
-
+        
+        # DEBUG for batch size
+        self.first_time = True
         # Allocate weights and initialize.
         args = get_args()
         if args.use_cpu_initialization:
@@ -145,6 +148,10 @@ class VocabParallelEmbedding(torch.nn.Module):
                                           partition_dim=0, stride=1)
 
     def forward(self, input_):
+        if self.first_time:
+            print(f"input size {input_.size()}")
+            self.first_time = False
+
         if self.model_parallel_size > 1:
             # Build the mask.
             input_mask = (input_ < self.vocab_start_index) | \
@@ -155,10 +162,12 @@ class VocabParallelEmbedding(torch.nn.Module):
         else:
             masked_input = input_
             # Get the embeddings.
+        #print(f"----------------------------{masked_input.size()}{self.weight.size()}-------")
         output_parallel = F.embedding(masked_input, self.weight,
                                       self.padding_idx, self.max_norm,
                                       self.norm_type, self.scale_grad_by_freq,
                                       self.sparse)
+        #print(f"----------------------------{output_parallel.size()}-------")
         # Mask the output embedding.
         if self.model_parallel_size > 1:
             output_parallel[input_mask, :] = 0.0
@@ -204,6 +213,7 @@ class ColumnParallelLinear(torch.nn.Module):
         # Divide the weight matrix along the last dimension.
         world_size = get_model_parallel_world_size()
         self.output_size_per_partition = divide(output_size, world_size)
+        print(f"debug:{output_size} {world_size}")
         self.skip_bias_add = skip_bias_add
 
         # Parameters.
@@ -251,8 +261,14 @@ class ColumnParallelLinear(torch.nn.Module):
         input_parallel = copy_to_model_parallel_region(input_)
         # Matrix multiply.
 
+        #vim eprint(input_.shape)
+        print(f"in column parallel: {input_.shape} {self.weight.shape}")  
         bias = self.bias if not self.skip_bias_add else None
+        time_s = time.time()
+        #print(input_parallel.dtype, self.weight.dtype)
         output_parallel = F.linear(input_parallel, self.weight, bias)
+        #torch.cuda.synchronize()
+        #print(f"matmul: {time.time() - time_s}")
         if self.gather_output:
             # All-gather across the partitions.
             output = gather_from_model_parallel_region(output_parallel)
@@ -350,7 +366,10 @@ class RowParallelLinear(torch.nn.Module):
         else:
             input_parallel = scatter_to_model_parallel_region(input_)
         # Matrix multiply.
+        time_s = time.time()
         output_parallel = F.linear(input_parallel, self.weight)
+        #torch.cuda.synchronize()
+        #print(f"matmul: {time.time() - time_s}")
         # All-reduce across all the partitions.
         output_ = reduce_from_model_parallel_region(output_parallel)
         if not self.skip_bias_add:

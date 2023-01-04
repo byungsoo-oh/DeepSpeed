@@ -132,7 +132,9 @@ class GPT2Dataset(torch.utils.data.Dataset):
                 self.doc_idx[doc_index_l],
                 length=offset_l + 1))
             sample = np.concatenate(sample_list)
-
+        print(f"sample: {sample}")
+        print(f"sample size: {sample.size}")
+        #assert False
         return {'text': np.array(sample, dtype=np.int64)}
 
 

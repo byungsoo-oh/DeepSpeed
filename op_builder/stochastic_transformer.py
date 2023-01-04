@@ -1,6 +1,7 @@
 """
 Copyright 2020 The Microsoft DeepSpeed Team
 """
+import torch
 from .transformer import TransformerBuilder
 
 
